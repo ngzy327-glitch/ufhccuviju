@@ -18,7 +18,7 @@ load_dotenv(BASE / ".env", override=True)
 
 BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
 # 白名单：只有这些 TG 用户 ID 才能使用！
-ALLOWED_UIDS = {12345678}  # 改成你自己的 TG 数字ID，多个用逗号隔开
+ALLOWED_UIDS = {829799375}  # 改成你自己的 TG 数字ID，多个用逗号隔开
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
