@@ -1,32 +1,30 @@
-# ==== 核心 HTTP/环境 ====
+# ==== 核心 HTTP ====
 httpx>=0.27
+httpx[http2]>=0.27
 requests>=2.31
 python-dotenv>=1.0
 
-# ==== 图像与网页解析（侦察/报告用） ====
+# ==== 图像与网页解析 ====
 Pillow>=10.0
 beautifulsoup4>=4.12
 lxml>=5.0
 trafilatura>=2.0
 
-# ==== 搜索与测绘（侦察辅助） ====
+# ==== 搜索 ====
 ddgs>=9.0
 googlesearch-python>=1.2
 
-# ==== 报告生成 ====
+# ==== 报告 ====
 pypdf>=4.0
 reportlab>=4.0
 
-# ==== 加密/凭证/攻击模块可能依赖 ====
+# ==== 加密 / JWT ====
 cryptography>=42.0
+pyjwt>=2.8
 
-# ==== API 网关（redteam_api.py 需要） ====
+# ==== API 网关 ====
 fastapi>=0.110
 uvicorn>=0.29
 
-# ==== Telegram Bot 控制端（tg_bot.py 需要） ====
+# ==== Telegram Bot ====
 python-telegram-bot>=20.0
-
-# ==== 打码和验证码（可选，用到时再取消注释安装） ====
-# capmonster_python>=1.2
-# ddddocr>=1.5
