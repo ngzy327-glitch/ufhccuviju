@@ -1,0 +1,24 @@
+# 环境变量（含所有密钥，绝对不能上传！）
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# 本地数据
+data.db
+audit.log
+*.session
+sessions/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
