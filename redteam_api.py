@@ -39,10 +39,17 @@ def _sub(cmd, timeout=120):
             f"timeout {timeout} bash -c '{cmd.replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))}' </dev/null",
             shell=True, capture_output=True, text=True, timeout=timeout + 15,
             cwd=str(BASE), **_SHELL)
-        return (p.stdout or "")[:8000] or (p.stderr or "")[:1000] or "Done"
+        out = (p.stdout or "").strip()
+        err = (p.stderr or "").strip()
+        if out and len(out) > 3:
+            return out[:8000]
+        if err and len(err) > 3:
+            return f"[FAIL-STOP] 命令报错: {err[:1000]}"
+        return "[命令执行成功但无输出]"
+    except subprocess.TimeoutExpired:
+        return f"[FAIL-STOP] 命令超时({timeout}s), 被强制终止"
     except Exception as e:
-        return f"[执行异常] {type(e).__name__}: {e}"
-
+        return f"[FAIL-STOP] 执行异常: {type(e).__name__}: {e}"
 def _exec_tool(name, args, uid=0):
     try:
         a = args or {}
