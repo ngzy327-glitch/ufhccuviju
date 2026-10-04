@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""红队工具引擎 — 防循环版"""
+"""红队工具引擎 — 防循环完整版"""
 import json, os, time, subprocess, re as _re
 from pathlib import Path
 import httpx
@@ -34,7 +34,7 @@ TOOLS_WHALE = [
 _SHELL = dict(env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 def _sub(cmd, timeout=60):
-    """改进版: 明确区分 stdout/stderr/超时, 防止AI误判重试"""
+    """明确区分 stdout/stderr/超时, 防止AI误判重试"""
     try:
         p = subprocess.run(
             f"timeout {timeout} bash -c '{cmd.replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))}' </dev/null",
@@ -138,7 +138,7 @@ def _exec_tool(name, args, uid=0):
                     r = httpx.request(method, url, content=data.encode() if data else None,
                                       headers=hdrs, timeout=10, follow_redirects=True)
                     with lock: results.append((r.status_code, len(r.content)))
-                except Exception as e:
+                except Exception:
                     with lock: results.append(("ERR", 0))
             ths = [threading.Thread(target=_one) for _ in range(n)]
             for t in ths: t.start()
@@ -176,9 +176,8 @@ def _exec_tool(name, args, uid=0):
         return f"[FAIL-STOP] 工具错误: {type(e).__name__}: {str(e)[:200]}"
     return f"[FAIL-STOP] 未知工具 {name}"
 
-# ===== 防循环核心: 重复调用检测 =====
-def _agent_loop(uid, messages, max_round=5):
-    """最多5轮, 重复工具+参数立即终止"""
+def _agent_loop(uid, messages, max_round=12):
+    """最多12轮, 同一工具+参数重复3次才终止"""
     cur = list(messages)
     recent_sigs = []
     for _ in range(max_round):
@@ -195,25 +194,24 @@ def _agent_loop(uid, messages, max_round=5):
         cur.append(msg)
         for tc in tcs:
             if not isinstance(tc, dict): continue
-            # 重复调用签名检测
             sig = (tc.get("function", {}).get("name", ""), tc.get("function", {}).get("arguments", ""))
-            if sig in recent_sigs:
-                return cur, None, {"role": "assistant", "content": "[检测到重复调用同一工具+参数, 已自动停止。请换个思路或重新描述任务。]"}
+            if recent_sigs.count(sig) >= 2:
+                return cur, None, {"role": "assistant", "content": "[检测到同一操作重复3次无效, 自动停止。请换个思路或补充信息。]"}
             recent_sigs.append(sig)
-            if len(recent_sigs) > 4: recent_sigs.pop(0)
+            if len(recent_sigs) > 6: recent_sigs.pop(0)
             try:
                 args = json.loads(tc["function"].get("arguments", "{}") or "{}")
             except Exception:
                 args = {}
             res = _exec_tool(tc["function"]["name"], args, uid)
             cur.append({"role": "tool", "tool_call_id": tc.get("id") or f"call_{time.time():.0f}", "content": res[:3000]})
-    return cur, None, {"role": "assistant", "content": "[已达最大工具轮数5轮, 自动停止。请检查任务是否明确。]"}
+    return cur, None, {"role": "assistant", "content": "[已达最大轮数12轮, 自动停止。任务可能太复杂, 请拆分成小步骤重发。]"}
 
 SYSTEM_PROMPT = (
     "你是红队执行器。只对授权目标执行操作。"
     "工具返回以 [FAIL-STOP] 开头时, 表示路径已封死, 必须立刻停止重试并汇报原因。"
     "同一工具连续调用超过2次仍无结果时, 立即停止。"
-    "一轮对话最多5次工具调用, 超出必须总结现状。"
+    "一轮对话最多12次工具调用, 超出必须总结现状。"
 )
 
 def _auth(auth):
