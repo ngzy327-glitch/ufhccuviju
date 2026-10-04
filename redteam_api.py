@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""红队工具引擎 API — 完整版 (Railway适配)"""
-import json, os, time, sqlite3, hashlib, hmac, subprocess, re as _re, asyncio
+"""红队工具引擎 API — 精简版 (Railway适配)"""
+import json, os, time, subprocess, re as _re
 from pathlib import Path
 import httpx
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 BASE = Path(__file__).parent
@@ -13,67 +13,25 @@ load_dotenv(BASE / ".env", override=True)
 DEEPSEEK_API = os.getenv("DEEPSEEK_API", "https://api.deepseek.com/v1")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 MODEL_UP = "deepseek-chat"
-DB = str(BASE / "data.db")
 KEYS_F = BASE / "assistant_api_keys.json"
-_ADMINS = {None, None}
 
-app = FastAPI(title="whale-api")
-
-sys_path_done = False
-def _syspath():
-    global sys_path_done
-    if not sys_path_done:
-        import sys
-        sys.path.insert(0, str(BASE))
-        sys.path.insert(0, str(BASE / "deepseek_bot"))
-        sys_path_done = True
+app = FastAPI(title="redteam-api")
 
 TOOLS_WHALE = [
  {"type":"function","function":{"name":"sh","description":"Run shell command","parameters":{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}}},
  {"type":"function","function":{"name":"read","description":"Read file","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}},
  {"type":"function","function":{"name":"write","description":"Write file","parameters":{"type":"object","properties":{"path":{"type":"string"},"text":{"type":"string"}},"required":["path","text"]}}},
  {"type":"function","function":{"name":"edit","description":"Replace text in file","parameters":{"type":"object","properties":{"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}},"required":["path","old","new"]}}},
- {"type":"function","function":{"name":"search","description":"Web search (Google)","parameters":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}}},
- {"type":"function","function":{"name":"sys","description":"System:info/docker/svc/git/install","parameters":{"type":"object","properties":{"act":{"type":"string"},"tgt":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"url","description":"Fetch/extract/download/post webpage.","parameters":{"type":"object","properties":{"url":{"type":"string"},"act":{"type":"string"},"cookie":{"type":"string"},"data":{"type":"string"},"name":{"type":"string"}},"required":["url"]}}},
- {"type":"function","function":{"name":"file","description":"文件收发","parameters":{"type":"object","properties":{"name":{"type":"string"},"text":{"type":"string"},"act":{"type":"string"},"path":{"type":"string"}},"required":["name"]}}},
- {"type":"function","function":{"name":"coin","description":"Crypto price","parameters":{"type":"object","properties":{"coin":{"type":"string"}},"required":["coin"]}}},
- {"type":"function","function":{"name":"fofa","description":"FOFA资产测绘","parameters":{"type":"object","properties":{"act":{"type":"string"},"q":{"type":"string"},"limit":{"type":"integer"}},"required":["q"]}}},
- {"type":"function","function":{"name":"waf","description":"WAF逃逸","parameters":{"type":"object","properties":{"act":{"type":"string"},"attack_type":{"type":"string"},"payload":{"type":"string"},"target":{"type":"string"},"url_param":{"type":"string"},"waf_type":{"type":"string"}},"required":["payload"]}}},
- {"type":"function","function":{"name":"parse","description":"解析渗透工具输出","parameters":{"type":"object","properties":{"tool":{"type":"string"},"text":{"type":"string"},"project_id":{"type":"integer"}},"required":["tool","text"]}}},
- {"type":"function","function":{"name":"report","description":"生成渗透报告","parameters":{"type":"object","properties":{"act":{"type":"string"},"project_id":{"type":"integer"},"format":{"type":"string"}},"required":["act","project_id"]}}},
- {"type":"function","function":{"name":"data","description":"Bot data","parameters":{"type":"object","properties":{"act":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"memory","description":"长期记忆","parameters":{"type":"object","properties":{"act":{"type":"string"},"key":{"type":"string"},"value":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"img","description":"Image OCR","parameters":{"type":"object","properties":{"act":{"type":"string"},"path":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"shot","description":"Screenshot URL","parameters":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}}},
- {"type":"function","function":{"name":"pdf","description":"Create/read PDF","parameters":{"type":"object","properties":{"act":{"type":"string"},"path":{"type":"string"},"text":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"captcha","description":"验证码识别","parameters":{"type":"object","properties":{"act":{"type":"string"},"url":{"type":"string"},"sitekey":{"type":"string"},"path":{"type":"string"},"module":{"type":"string"},"subdomain":{"type":"string"},"invisible":{"type":"boolean"},"min_score":{"type":"number"}},"required":["act"]}}},
- {"type":"function","function":{"name":"lateral","description":"横向移动","parameters":{"type":"object","properties":{"act":{"type":"string"},"target":{"type":"string"},"credential":{"type":"string"},"cmd":{"type":"string"},"domain":{"type":"string"},"username":{"type":"string"},"password":{"type":"string"},"chain":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"privesc","description":"提权","parameters":{"type":"object","properties":{"act":{"type":"string"},"target":{"type":"string"},"os":{"type":"string"},"method":{"type":"string"},"payload":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"credential","description":"凭证攻击","parameters":{"type":"object","properties":{"act":{"type":"string"},"target":{"type":"string"},"domain":{"type":"string"},"dc_ip":{"type":"string"},"username":{"type":"string"},"password":{"type":"string"},"hash":{"type":"string"},"hashes":{"type":"string"},"users":{"type":"string"},"krbtgt_hash":{"type":"string"},"service_hash":{"type":"string"},"service":{"type":"string"},"ticket":{"type":"string"},"interface":{"type":"string"},"analyze":{"type":"boolean"},"timeout":{"type":"integer"},"nt_hash":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"adaptive_chain","description":"自适应攻击链","parameters":{"type":"object","properties":{"act":{"type":"string"},"target":{"type":"string"},"project_id":{"type":"integer"},"chain_id":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"api_attack","description":"API攻击","parameters":{"type":"object","properties":{"act":{"type":"string"},"url":{"type":"string"},"token":{"type":"string"},"mode":{"type":"string"},"flow":{"type":"string"},"wordlist":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"c2","description":"C2集成","parameters":{"type":"object","properties":{"act":{"type":"string"},"protocol":{"type":"string"},"host":{"type":"string"},"port":{"type":"string"},"os":{"type":"string"},"arch":{"type":"string"},"target":{"type":"string"},"beacon_id":{"type":"string"},"method":{"type":"string"},"command":{"type":"string"},"profile":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"cloud","description":"云攻击","parameters":{"type":"object","properties":{"act":{"type":"string"},"target":{"type":"string"},"bucket":{"type":"string"},"vault":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"container","description":"容器逃逸","parameters":{"type":"object","properties":{"act":{"type":"string"},"technique":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"evasion","description":"规避引擎","parameters":{"type":"object","properties":{"act":{"type":"string"},"target":{"type":"string"},"payload_type":{"type":"string"},"lhost":{"type":"string"},"lport":{"type":"integer"},"level":{"type":"string"},"shellcode":{"type":"string"},"method":{"type":"string"},"technique":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"exfil","description":"数据外传","parameters":{"type":"object","properties":{"act":{"type":"string"},"target":{"type":"string"},"paths":{"type":"string"},"files":{"type":"string"},"output":{"type":"string"},"method":{"type":"string"},"password":{"type":"string"},"input":{"type":"string"},"chunk_size_mb":{"type":"integer"},"channel":{"type":"string"},"server_url":{"type":"string"},"domain":{"type":"string"},"target_ip":{"type":"string"},"encrypt":{"type":"string"},"split":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"strix","description":"Strix AI渗透测试","parameters":{"type":"object","properties":{"act":{"type":"string"},"target":{"type":"string"},"mode":{"type":"string"},"timeout":{"type":"integer"},"extra_args":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"get_current_time","description":"获取当前时间","parameters":{"type":"object","properties":{"tz":{"type":"string"}},"required":["tz"]}}},
- {"type":"function","function":{"name":"project","description":"项目记录管理","parameters":{"type":"object","properties":{"act":{"type":"string"},"name":{"type":"string"},"target":{"type":"string"},"id":{"type":"integer"}},"required":["act"]}}},
- {"type":"function","function":{"name":"team","description":"多AI协作","parameters":{"type":"object","properties":{"act":{"type":"string"},"task":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"schedule","description":"定时任务","parameters":{"type":"object","properties":{"act":{"type":"string"},"name":{"type":"string"},"cron":{"type":"string"},"action":{"type":"string"},"id":{"type":"integer"}},"required":["act"]}}},
- {"type":"function","function":{"name":"conversation_search","description":"对话搜索","parameters":{"type":"object","properties":{"q":{"type":"string"},"limit":{"type":"integer"}},"required":["q"]}}},
- {"type":"function","function":{"name":"proxy","description":"代理池管理","parameters":{"type":"object","properties":{"act":{"type":"string"},"value":{"type":"string"}},"required":["act"]}}},
- {"type":"function","function":{"name":"http_burst","description":"并发HTTP请求: url method data headers(JSON) n并发数","parameters":{"type":"object","properties":{"url":{"type":"string"},"method":{"type":"string"},"data":{"type":"string"},"headers":{"type":"string"},"n":{"type":"integer"}},"required":["url"]}}},
- {"type":"function","function":{"name":"jwt_decode","description":"解析JWT(不验签)","parameters":{"type":"object","properties":{"token":{"type":"string"}},"required":["token"]}}},
- {"type":"function","function":{"name":"jwt_forge","description":"伪造JWT: payload(JSON) secret(留空试none) alg","parameters":{"type":"object","properties":{"payload":{"type":"string"},"secret":{"type":"string"},"alg":{"type":"string"}},"required":["payload"]}}},
+ {"type":"function","function":{"name":"url","description":"Fetch webpage or POST","parameters":{"type":"object","properties":{"url":{"type":"string"},"method":{"type":"string"},"data":{"type":"string"},"cookie":{"type":"string"}},"required":["url"]}}},
+ {"type":"function","function":{"name":"search","description":"Web search","parameters":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}}},
+ {"type":"function","function":{"name":"fofa","description":"FOFA asset search","parameters":{"type":"object","properties":{"q":{"type":"string"},"limit":{"type":"integer"}},"required":["q"]}}},
+ {"type":"function","function":{"name":"get_current_time","description":"Get current time","parameters":{"type":"object","properties":{"tz":{"type":"string"}},"required":["tz"]}}},
+ {"type":"function","function":{"name":"http_burst","description":"并发HTTP请求: url method data headers n","parameters":{"type":"object","properties":{"url":{"type":"string"},"method":{"type":"string"},"data":{"type":"string"},"headers":{"type":"string"},"n":{"type":"integer"}},"required":["url"]}}},
+ {"type":"function","function":{"name":"jwt_decode","description":"解析JWT","parameters":{"type":"object","properties":{"token":{"type":"string"}},"required":["token"]}}},
+ {"type":"function","function":{"name":"jwt_forge","description":"伪造JWT: payload secret alg","parameters":{"type":"object","properties":{"payload":{"type":"string"},"secret":{"type":"string"},"alg":{"type":"string"}},"required":["payload"]}}},
 ]
 
-_CG_IDS = {"btc":"bitcoin","eth":"ethereum","usdt":"tether","trx":"tron","ton":"the-open-network","doge":"dogecoin","sol":"solana","bnb":"binancecoin","xrp":"ripple","ltc":"litecoin","shib":"shiba-inu","pepe":"pepe","sui":"sui","usdc":"usd-coin","pol":"matic-network","matic":"matic-network","bch":"bitcoin-cash","ada":"cardano","dai":"dai","uni":"uniswap","atom":"cosmos","near":"near","avax":"avalanche-2","apt":"aptos","okb":"okb","gmt":"stepn","fil":"filecoin","dot":"polkadot","link":"chainlink","dog":"dogecoin","mew":"mew","bonk":"bonk","arb":"arbitrum","op":"optimism","mkr":"maker"}
-
 _SHELL = dict(env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-
 
 def _sub(cmd, timeout=120):
     try:
@@ -85,34 +43,181 @@ def _sub(cmd, timeout=120):
     except Exception as e:
         return f"[执行异常] {type(e).__name__}: {e}"
 
-
-SUBAGENT_SYS = "你是红队专职执行子agent。独立上下文, 只干被分配的活, 干完用三句话总结。"
-
-
-def _subagent_sync(task, uid, rounds=6):
-    _sm = [{"role": "system", "content": SUBAGENT_SYS}, {"role": "user", "content": task}]
+def _exec_tool(name, args, uid=0):
     try:
-        for _ri in range(rounds):
-            r = httpx.post(f"{DEEPSEEK_API}/chat/completions",
-                           headers={"Authorization": f"Bearer {DEEPSEEK_KEY}", "Content-Type": "application/json"},
-                           json={"model": MODEL_UP, "messages": _sm, "tools": TOOLS_WHALE, "max_tokens": 4096, "stream": False}, timeout=150)
-            if r.status_code != 200:
-                return f"子任务失败(HTTP {r.status_code})"
-            _msg = r.json()["choices"][0]["message"]
-            if not _msg.get("tool_calls"):
-                _sm.append({"role": "assistant", "content": _msg.get("content") or ""})
-                return (_msg.get("content") or "").strip() or "子任务完成(无输出)"
-            _sm.append({"role": "assistant", "content": _msg.get("content") or "", "tool_calls": _msg["tool_calls"]})
-            for _tc in _msg["tool_calls"]:
-                if not isinstance(_tc, dict): continue
-                try: _args = json.loads(_tc["function"].get("arguments", "{}") or "{}")
-                except Exception: _args = {}
-                if not isinstance(_args, dict): _args = {}
-                _res = _exec_tool(_tc["function"]["name"], _args, uid)
-                _sm.append({"role": "tool", "tool_call_id": _tc.get("id", "") or f"call_{time.time():.0f}", "content": _res[:8000]})
-        return "子任务轮次耗尽, 未完成"
-    except Exception as _e:
-        return f"子任务异常: {_e}"
+        a = args or {}
+        if name == "sh":
+            return _sub(str(a.get("cmd", "")).strip())
+        if name == "read":
+            p = a["path"]
+            if not p.startswith("/"): p = str(BASE / p)
+            if not os.path.isfile(p): return f"❌ 不存在: {p}"
+            with open(p) as f: return f.read()[:8000]
+        if name == "write":
+            p = a["path"]
+            if not p.startswith("/"): p = str(BASE / p)
+            tx = a.get("text") or a.get("content") or ""
+            if not tx: return "❌ 内容为空"
+            os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+            with open(p, "w") as f: f.write(tx)
+            return f"OK {len(tx)}b"
+        if name == "edit":
+            p = a["path"]
+            if not p.startswith("/"): p = str(BASE / p)
+            if not os.path.isfile(p): return f"❌ 不存在: {p}"
+            with open(p) as f: c = f.read()
+            if a["old"] not in c: return "NotFound"
+            with open(p, "w") as f: f.write(c.replace(a["old"], a["new"], 1))
+            return "Done"
+        if name == "url":
+            url = a.get("url", ""); method = a.get("method", "GET").upper()
+            data = a.get("data", ""); cookie = a.get("cookie", "")
+            h = {"User-Agent": "Mozilla/5.0"}
+            if cookie: h["Cookie"] = cookie
+            r = httpx.request(method, url, content=data.encode() if data else None,
+                              headers=h, timeout=20, follow_redirects=True)
+            return r.text[:6000]
+        if name == "search":
+            try:
+                from duckduckgo_search import DDGS
+                with DDGS() as d:
+                    return "\n".join(f"{x['title']}\n{x['href']}" for x in d.text(a.get("q", ""), max_results=5))[:4000]
+            except Exception as e:
+                return f"Search fail: {e}"
+        if name == "fofa":
+            q = a.get("q", ""); limit = min(int(a.get("limit", 20) or 20), 100)
+            if not q: return "fofa: 需要 q"
+            fe = os.getenv("FOFA_EMAIL", ""); fk = os.getenv("FOFA_API_KEY", "")
+            if not fe or not fk: return "fofa: 未配置 FOFA_EMAIL/FOFA_API_KEY"
+            import base64, urllib.parse
+            qb64 = base64.b64encode(q.encode()).decode()
+            u = f"https://fofa.info/api/v1/search/all?email={urllib.parse.quote(fe)}&key={fk}&qbase64={qb64}&size={limit}&fields=host,ip,port,title"
+            r = httpx.get(u, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+            d = r.json()
+            if d.get("error"): return f"err: {d.get('errmsg')}"
+            res = d.get("results", [])
+            return "\n".join(f"{x[0]} | {x[1]}:{x[2]} | {str(x[3])[:50]}" for x in res) or "无结果"
+        if name == "get_current_time":
+            import datetime as dt
+            tz = a.get("tz", "Asia/Shanghai")
+            try:
+                from zoneinfo import ZoneInfo
+                now = dt.datetime.now(ZoneInfo(tz))
+            except Exception:
+                now = dt.datetime.utcnow()
+            return now.strftime("%Y-%m-%d %H:%M:%S") + f" ({tz})"
+        if name == "http_burst":
+            import threading
+            from collections import Counter
+            url = a.get("url", ""); method = a.get("method", "GET").upper()
+            n = min(int(a.get("n", 20)), 200)
+            data = a.get("data", "")
+            try:
+                hdrs = json.loads(a.get("headers", "") or "{}")
+            except Exception:
+                hdrs = {}
+            results = []
+            lock = threading.Lock()
+            def _one():
+                try:
+                    r = httpx.request(method, url, content=data.encode() if data else None,
+                                      headers=hdrs, timeout=15, follow_redirects=True)
+                    with lock: results.append((r.status_code, len(r.content), r.text[:150]))
+                except Exception as e:
+                    with lock: results.append(("ERR", 0, str(e)[:80]))
+            ths = [threading.Thread(target=_one) for _ in range(n)]
+            t0 = time.time()
+            for t in ths: t.start()
+            for t in ths: t.join()
+            el = time.time() - t0
+            codes = Counter(r[0] for r in results)
+            sizes = Counter(r[1] for r in results)
+            return f"并发{n} 耗时{el:.2f}s\n状态码: {dict(codes)}\n响应大小: {dict(sizes)}\n前3样本:\n" + "\n".join(repr(r) for r in results[:3])
+        if name == "jwt_decode":
+            import base64
+            tok = a.get("token", "").strip()
+            ps = tok.split(".")
+            if len(ps) != 3: return "❌ 不是有效 JWT"
+            def _d(s):
+                s += "=" * (-len(s) % 4)
+                return base64.urlsafe_b64decode(s).decode("utf-8", "replace")
+            return f"HEADER: {_d(ps[0])}\nPAYLOAD: {_d(ps[1])}\nSIG: {ps[2][:80]}"
+        if name == "jwt_forge":
+            try:
+                payload = json.loads(a.get("payload", "{}"))
+            except Exception as e:
+                return f"❌ payload 不合法: {e}"
+            secret = a.get("secret", ""); alg = a.get("alg", "HS256")
+            try:
+                import jwt as _j
+                tok = _j.encode(payload, "", algorithm="none") if (alg.lower() == "none" or not secret) else _j.encode(payload, secret, algorithm=alg)
+                return f"FORGED: {tok}"
+            except ImportError:
+                return "❌ pyjwt 未安装"
+            except Exception as e:
+                return f"失败: {e}"
+    except Exception as e:
+        return f"[工具错误] {type(e).__name__}: {str(e)[:300]}"
+    return f"[未知工具 {name}]"
 
+def _agent_loop(uid, messages, max_round=8):
+    cur = list(messages)
+    for _ in range(max_round):
+        r = httpx.post(f"{DEEPSEEK_API}/chat/completions",
+                       headers={"Authorization": f"Bearer {DEEPSEEK_KEY}", "Content-Type": "application/json"},
+                       json={"model": MODEL_UP, "messages": cur, "tools": TOOLS_WHALE, "max_tokens": 2048, "stream": False},
+                       timeout=240)
+        if r.status_code != 200:
+            return cur, r.text[:300], None
+        msg = r.json()["choices"][0]["message"]
+        tcs = msg.get("tool_calls")
+        if not tcs:
+            return cur, None, msg
+        cur.append(msg)
+        for tc in tcs:
+            if not isinstance(tc, dict): continue
+            try:
+                args = json.loads(tc["function"].get("arguments", "{}") or "{}")
+            except Exception:
+                args = {}
+            res = _exec_tool(tc["function"]["name"], args, uid)
+            cur.append({"role": "tool", "tool_call_id": tc.get("id") or f"call_{time.time():.0f}", "content": res[:3000]})
+    return cur, "TOOL_LOOP_MAX", None
 
-# ===== 第一段结束，第二段从这里继续 =====
+SYSTEM_PROMPT = "你是靶场红队执行器。只对授权目标执行操作。需要动手的任务直接调用工具, 干完用结果说话。"
+
+def _auth(auth):
+    if not auth or not auth.startswith("Bearer "):
+        raise HTTPException(401, "Unauthorized")
+    k = auth[7:].strip()
+    try:
+        m = json.loads(KEYS_F.read_text(encoding="utf-8"))
+    except Exception:
+        m = {}
+    if k not in m:
+        raise HTTPException(401, "Invalid key")
+    return int(m[k])
+
+@app.get("/v1/health")
+async def health():
+    return {"ok": True, "ts": int(time.time())}
+
+@app.post("/v1/chat/completions")
+async def chat(request: Request):
+    uid = _auth(request.headers.get("authorization"))
+    body = await request.json()
+    messages = body.get("messages") or []
+    if not messages:
+        raise HTTPException(400, "messages required")
+    if len(messages) > 20: messages = messages[-20:]
+    full = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+    cur, err, final = _agent_loop(uid, full)
+    if final is not None:
+        return JSONResponse({"id": f"chatcmpl-{uid}", "object": "chat.completion", "created": int(time.time()),
+                             "model": "redteam", "choices": [{"index": 0, "message": final, "finish_reason": "stop"}]})
+    return JSONResponse({"id": f"chatcmpl-{uid}", "object": "chat.completion", "created": int(time.time()),
+        "model": "redteam", "choices": [{"index": 0, "message": {"role": "assistant", "content": f"[循环终止] {err}"}, "finish_reason": "stop"}]})
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8894)), log_level="warning")
