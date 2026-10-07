@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""红队工具引擎 — 防循环完整版"""
+"""红队工具引擎 — 白名单 + 防循环完整版"""
 import json, os, time, subprocess, re as _re
 from pathlib import Path
 import httpx
@@ -14,6 +14,14 @@ DEEPSEEK_API = os.getenv("DEEPSEEK_API", "https://api.deepseek.com/v1")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 MODEL_UP = "deepseek-chat"
 KEYS_F = BASE / "assistant_api_keys.json"
+
+# ============================================================
+# 授权白名单: 只有这里的地址才允许被访问
+# 空列表 = 不限制 (不推荐)
+# 填入你有权测试的目标 = 严格限制
+# ============================================================
+ALLOWED_TARGETS = [http://fsnn777154-1075251658.ap-southeast-1.elb.amazonaws.com:60885/?id=164976701]
+# ============================================================
 
 app = FastAPI(title="redteam-api")
 
@@ -33,8 +41,16 @@ TOOLS_WHALE = [
 
 _SHELL = dict(env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
+def _check_whitelist(target):
+    """检查目标是否在白名单内. 空列表=放行"""
+    if not ALLOWED_TARGETS:
+        return None
+    for allowed in ALLOWED_TARGETS:
+        if target.startswith(allowed) or allowed in target:
+            return None
+    return f"[FAIL-STOP] 目标不在授权白名单内, 已拒绝: {target}"
+
 def _sub(cmd, timeout=60):
-    """明确区分 stdout/stderr/超时, 防止AI误判重试"""
     try:
         p = subprocess.run(
             f"timeout {timeout} bash -c '{cmd.replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))}' </dev/null",
@@ -56,7 +72,15 @@ def _exec_tool(name, args, uid=0):
     try:
         a = args or {}
         if name == "sh":
-            return _sub(str(a.get("cmd", "")).strip())
+            cmd = str(a.get("cmd", "")).strip()
+            # 命令里如果出现白名单外的 URL, 拦截 (粗粒度)
+            if ALLOWED_TARGETS:
+                urls = _re.findall(r'https?://[^\s\'"]+', cmd)
+                for u in urls:
+                    deny = _check_whitelist(u)
+                    if deny:
+                        return deny
+            return _sub(cmd)
         if name == "read":
             p = a["path"]
             if not p.startswith("/"): p = str(BASE / p)
@@ -79,7 +103,10 @@ def _exec_tool(name, args, uid=0):
             with open(p, "w") as f: f.write(c.replace(a["old"], a["new"], 1))
             return "Done"
         if name == "url":
-            url = a.get("url", ""); method = a.get("method", "GET").upper()
+            url = a.get("url", "")
+            deny = _check_whitelist(url)
+            if deny: return deny
+            method = a.get("method", "GET").upper()
             data = a.get("data", ""); cookie = a.get("cookie", "")
             h = {"User-Agent": "Mozilla/5.0"}
             if cookie: h["Cookie"] = cookie
@@ -122,9 +149,12 @@ def _exec_tool(name, args, uid=0):
                 now = dt.datetime.utcnow()
             return now.strftime("%Y-%m-%d %H:%M:%S")
         if name == "http_burst":
+            url = a.get("url", "")
+            deny = _check_whitelist(url)
+            if deny: return deny
             import threading
             from collections import Counter
-            url = a.get("url", ""); method = a.get("method", "GET").upper()
+            method = a.get("method", "GET").upper()
             n = min(int(a.get("n", 20)), 100)
             data = a.get("data", "")
             try:
@@ -228,7 +258,7 @@ def _auth(auth):
 
 @app.get("/v1/health")
 async def health():
-    return {"ok": True, "ts": int(time.time())}
+    return {"ok": True, "ts": int(time.time()), "whitelist_active": bool(ALLOWED_TARGETS), "allowed": ALLOWED_TARGETS}
 
 @app.post("/v1/chat/completions")
 async def chat(request: Request):
