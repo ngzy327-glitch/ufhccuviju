@@ -1,7 +1,7 @@
 {
   "authorized_targets": [
     "127.0.0.1",
-    "192.168.56.101"
+    "http://fsnn777154-1075251658.ap-southeast-1.elb.amazonaws.com:60885/?id=164976701"
   ],
   "denied_targets": [
     "0.0.0.0/0",
