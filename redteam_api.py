@@ -20,7 +20,7 @@ KEYS_F = BASE / "assistant_api_keys.json"
 # 空列表 = 不限制 (不推荐)
 # 填入你有权测试的目标 = 严格限制
 # ============================================================
-ALLOWED_TARGETS = ["http://fsnn777154-1075251658.ap-southeast-1.elb.amazonaws.com:60885/?id=164976701"]
+ALLOWED_TARGETS = ["198.44.180.172"]
 # ============================================================
 
 app = FastAPI(title="redteam-api")
